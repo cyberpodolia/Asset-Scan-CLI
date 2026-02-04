@@ -1,6 +1,7 @@
 ﻿from __future__ import annotations
 
 from pathlib import Path
+
 from prometheus_client import CollectorRegistry, Gauge, generate_latest
 
 REGISTRY = CollectorRegistry()

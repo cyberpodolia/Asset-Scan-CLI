@@ -3,6 +3,7 @@
 import os
 import time
 from pathlib import Path
+from typing import Annotated
 
 import typer
 
@@ -23,20 +24,19 @@ def main() -> None:
 
 @app.command()
 def scan(
-    path: Path = typer.Argument(..., exists=True, file_okay=False, dir_okay=True),
-    output: Path = typer.Option("report.json", "--output", "-o"),
-    extensions: str = typer.Option(
-        ".png,.jpg,.fbx,.obj,.wav",
-        "--extensions",
-        "-e",
-        help="Comma-separated extensions",
-    ),
-    name_regex: str = typer.Option(
-        "^[a-z0-9_\\-]+$",
-        "--name-regex",
-        "-r",
-        help="Regex for valid base filenames",
-    ),
+    path: Annotated[
+        Path,
+        typer.Argument(..., exists=True, file_okay=False, dir_okay=True),
+    ],
+    output: Annotated[Path, typer.Option("--output", "-o")] = Path("report.json"),
+    extensions: Annotated[
+        str,
+        typer.Option("--extensions", "-e", help="Comma-separated extensions"),
+    ] = ".png,.jpg,.fbx,.obj,.wav",
+    name_regex: Annotated[
+        str,
+        typer.Option("--name-regex", "-r", help="Regex for valid base filenames"),
+    ] = "^[a-z0-9_\\-]+$",
 ) -> None:
     settings = get_settings()
     setup_logging(settings.log_level)
