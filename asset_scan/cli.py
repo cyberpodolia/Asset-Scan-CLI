@@ -15,6 +15,12 @@ from asset_scan.scanner import scan_path
 app = typer.Typer(add_completion=False)
 
 
+@app.callback()
+def main() -> None:
+    """Asset scan CLI."""
+    return
+
+
 @app.command()
 def scan(
     path: Path = typer.Argument(..., exists=True, file_okay=False, dir_okay=True),

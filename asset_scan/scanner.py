@@ -1,5 +1,6 @@
 ﻿from __future__ import annotations
 
+import heapq
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -27,17 +28,22 @@ def scan_path(path: Path, extensions: str | None, name_regex: str) -> ScanResult
     ext_set = _normalize_extensions(extensions)
     pattern = re.compile(name_regex)
 
-    files = [p for p in path.rglob("*") if p.is_file()]
-    if ext_set:
-        files = [p for p in files if p.suffix.lower() in ext_set]
-
     by_extension: dict[str, int] = {}
     invalid_names: list[str] = []
-    size_list: list[tuple[Path, int]] = []
+    top_sizes: list[tuple[int, Path]] = []
     name_map: dict[str, list[Path]] = {}
+    total_files = 0
 
-    for p in files:
-        ext = p.suffix.lower() or "(none)"
+    for p in path.rglob("*"):
+        if not p.is_file():
+            continue
+
+        suffix = p.suffix.lower()
+        if ext_set and suffix not in ext_set:
+            continue
+
+        total_files += 1
+        ext = suffix or "(none)"
         by_extension[ext] = by_extension.get(ext, 0) + 1
 
         base = p.stem
@@ -45,12 +51,15 @@ def scan_path(path: Path, extensions: str | None, name_regex: str) -> ScanResult
             invalid_names.append(str(p))
 
         size = p.stat().st_size
-        size_list.append((p, size))
+        if len(top_sizes) < 10:
+            heapq.heappush(top_sizes, (size, p))
+        else:
+            heapq.heappushpop(top_sizes, (size, p))
 
         name_map.setdefault(base, []).append(p)
 
-    largest = sorted(size_list, key=lambda x: x[1], reverse=True)[:10]
-    largest_files = [{"path": str(p), "size": size} for p, size in largest]
+    largest = sorted(top_sizes, key=lambda x: x[0], reverse=True)
+    largest_files = [{"path": str(p), "size": size} for size, p in largest]
 
     duplicates = []
     for name, paths in name_map.items():
@@ -66,7 +75,7 @@ def scan_path(path: Path, extensions: str | None, name_regex: str) -> ScanResult
     return ScanResult(
         scanned_path=str(path),
         timestamp_utc=datetime.now(timezone.utc).isoformat(),
-        total_files=len(files),
+        total_files=total_files,
         by_extension=by_extension,
         invalid_names=invalid_names,
         largest_files=largest_files,
