@@ -1,3 +1,9 @@
+"""Prometheus textfile metric export for scan summaries.
+
+Metrics are written as a one-shot snapshot after a scan. The write is atomic
+(`temp file -> replace`) so scrapers do not read partially written files.
+"""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -15,9 +21,15 @@ def write_metrics(
     duplicate_groups: int,
     errors_total: int,
 ) -> None:
+    """Write scan summary gauges in Prometheus textfile format.
+
+    Raises `OSError` when the target directory or file cannot be written.
+    Callers decide whether metrics failures should affect process exit status.
+    """
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
 
+    # Rationale: use a fresh registry per write to avoid stale values across runs/tests.
     registry = CollectorRegistry()
     Gauge("asset_scan_duration_seconds", "Scan duration in seconds", registry=registry).set(
         duration
@@ -38,4 +50,5 @@ def write_metrics(
         tmp.write(payload)
         tmp_path = Path(tmp.name)
 
+    # Why: atomic replace prevents node_exporter from scraping truncated output.
     tmp_path.replace(target)

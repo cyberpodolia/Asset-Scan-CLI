@@ -1,3 +1,11 @@
+"""Filesystem scanner and report data models for the asset-scan CLI.
+
+This module performs an iterative directory walk, applies filters/validation,
+and accumulates bounded summary structures (top-N sizes, duplicate samples,
+error samples). Side effects are filesystem reads only; all output is returned
+as a `ScanResult` value for the CLI/report layers.
+"""
+
 from __future__ import annotations
 
 import heapq
@@ -16,6 +24,8 @@ DuplicatesKey = Literal["stem", "stem+ext"]
 
 @dataclass(frozen=True)
 class ScanOptions:
+    """Runtime scan configuration derived from CLI flags."""
+
     extensions: tuple[str, ...] = ()
     name_regex: str = r"^[a-z0-9_\-]+$"
     exclude: tuple[str, ...] = ()
@@ -31,6 +41,12 @@ class ScanOptions:
 
 @dataclass(frozen=True)
 class ErrorRecord:
+    """A single captured filesystem error sample.
+
+    `path` is relative to the scan root. The error list may be truncated while
+    `errors_total` in `ScanResult` continues counting all occurrences.
+    """
+
     path: str
     error_type: str
     message: str
@@ -38,12 +54,16 @@ class ErrorRecord:
 
 @dataclass(frozen=True)
 class LargestFileRecord:
+    """One item in the top-N largest-files list (`size` in bytes)."""
+
     path: str
     size: int
 
 
 @dataclass(frozen=True)
 class DuplicateGroup:
+    """Duplicate-name summary with an accurate count and capped path samples."""
+
     name: str
     count: int
     paths: list[str]
@@ -51,6 +71,8 @@ class DuplicateGroup:
 
 @dataclass(frozen=True)
 class ScanResult:
+    """Deterministic scan report payload consumed by serializers and tests."""
+
     schema_version: str
     tool_version: str
     scanned_path: str
@@ -66,6 +88,7 @@ class ScanResult:
 
 
 def _normalize_extensions(extensions: tuple[str, ...] | list[str] | None) -> tuple[str, ...]:
+    """Normalize extension inputs to lowercase dotted suffixes."""
     if not extensions:
         return ()
     normalized: set[str] = set()
@@ -79,6 +102,7 @@ def _normalize_extensions(extensions: tuple[str, ...] | list[str] | None) -> tup
 
 
 def _rel_posix(root: Path, target: str | Path) -> str:
+    """Return a root-relative path using forward slashes for portable reports."""
     target_str = os.fspath(target)
     rel = os.path.relpath(target_str, os.fspath(root))
     if rel == ".":
@@ -87,10 +111,12 @@ def _rel_posix(root: Path, target: str | Path) -> str:
 
 
 def _matches_exclude(rel_path: str, patterns: tuple[str, ...], *, is_dir: bool) -> bool:
+    """Match root-relative glob excludes for files and directory traversal decisions."""
     if not patterns or rel_path == ".":
         return False
     candidates = [rel_path]
     if is_dir:
+        # Edge case: callers may pass patterns that imply a trailing separator.
         candidates.extend([f"{rel_path}/", f"{rel_path}/_"])
     for pattern in patterns:
         for candidate in candidates:
@@ -100,6 +126,7 @@ def _matches_exclude(rel_path: str, patterns: tuple[str, ...], *, is_dir: bool) 
 
 
 def _name_for_validation(rel_path: str, entry_name: str, validate: ValidateTarget) -> str:
+    """Select the string subject to regex validation based on CLI mode."""
     if validate == "stem":
         return Path(entry_name).stem
     if validate == "filename":
@@ -108,6 +135,7 @@ def _name_for_validation(rel_path: str, entry_name: str, validate: ValidateTarge
 
 
 def _duplicate_key(entry_name: str, duplicates_key: DuplicatesKey) -> str:
+    """Compute the duplicate grouping key using the configured naming strategy."""
     p = Path(entry_name)
     if duplicates_key == "stem":
         return p.stem
@@ -122,6 +150,7 @@ def _record_error(
     errors_total: int,
     max_errors: int,
 ) -> int:
+    """Append a sampled error record while keeping the total count exact."""
     new_total = errors_total + 1
     if len(errors) < max_errors:
         errors.append(
@@ -135,9 +164,16 @@ def _record_error(
 
 
 def _iter_files(root: Path, options: ScanOptions):
+    """Yield `(kind, rel_path, payload)` entries from an iterative directory walk.
+
+    `kind` is `"file"` with an `os.DirEntry` payload or `"error"` with an
+    exception payload. The iterator swallows common filesystem errors so callers
+    can decide whether they are fatal.
+    """
     stack: list[tuple[Path, int]] = [(root, 0)]
     visited_dirs: set[str] = set()
     if options.follow_symlinks:
+        # Perf/Safety: track resolved directories to prevent symlink cycles.
         visited_dirs.add(os.path.realpath(root))
 
     while stack:
@@ -149,6 +185,7 @@ def _iter_files(root: Path, options: ScanOptions):
             yield ("error", _rel_posix(root, current_dir), exc)
             continue
 
+        # Rationale: deterministic walk order keeps report ordering stable.
         entries.sort(key=lambda entry: entry.name)
 
         for entry in entries:
@@ -179,6 +216,7 @@ def _iter_files(root: Path, options: ScanOptions):
                         yield ("error", rel_path, exc)
                         continue
                     if real in visited_dirs:
+                        # Edge case: skip already-visited targets when following symlinks.
                         continue
                     visited_dirs.add(real)
                 stack.append((Path(entry.path), depth + 1))
@@ -196,6 +234,12 @@ def _iter_files(root: Path, options: ScanOptions):
 
 
 def scan_path(path: Path, options: ScanOptions, *, tool_version: str) -> ScanResult:
+    """Scan `path` and return an aggregated report.
+
+    The function is resilient to common filesystem failures and records them in
+    the result instead of raising. Regex compilation errors are not caught and
+    propagate to the caller because they indicate invalid user input.
+    """
     root = path.resolve()
     ext_set = set(_normalize_extensions(options.extensions))
     pattern = re.compile(options.name_regex)
@@ -227,6 +271,7 @@ def scan_path(path: Path, options: ScanOptions, *, tool_version: str) -> ScanRes
             continue
 
         if options.max_files is not None and total_files >= options.max_files:
+            # Rationale: stop early once the included-file budget is reached.
             break
 
         total_files += 1
@@ -260,6 +305,7 @@ def scan_path(path: Path, options: ScanOptions, *, tool_version: str) -> ScanRes
             if len(largest_heap) < options.top_n_largest:
                 heapq.heappush(largest_heap, item)
             else:
+                # Perf: maintain a fixed-size min-heap instead of sorting all files.
                 heapq.heappushpop(largest_heap, item)
 
     largest_files = [
@@ -277,6 +323,7 @@ def scan_path(path: Path, options: ScanOptions, *, tool_version: str) -> ScanRes
 
     invalid_names.sort()
     errors.sort(key=lambda err: (err.path, err.error_type, err.message))
+    # Rationale: normalize map ordering so JSON output is deterministic.
     by_extension = dict(sorted(by_extension.items(), key=lambda item: item[0]))
 
     return ScanResult(

@@ -1,3 +1,11 @@
+"""CLI entrypoints for asset scanning and report generation.
+
+The `scan` command translates user-facing options into `ScanOptions`, runs the
+filesystem scan, writes a report (file or stdout), and optionally emits
+Prometheus textfile metrics. Side effects are local filesystem I/O and stderr
+status output for automation logs.
+"""
+
 from __future__ import annotations
 
 import logging
@@ -25,7 +33,7 @@ EXIT_SCAN_ERROR = 3
 
 @app.callback()
 def main() -> None:
-    """Asset scan CLI."""
+    """Register a group-style CLI root so `asset-scan scan ...` is stable."""
 
 
 class OutputFormat(str, Enum):
@@ -51,6 +59,7 @@ class FailOnMode(str, Enum):
 
 
 def _parse_repeatable_csv(values: list[str] | None) -> tuple[str, ...]:
+    """Normalize repeatable Typer options that may also contain comma-separated values."""
     if not values:
         return ()
     items: list[str] = []
@@ -60,10 +69,13 @@ def _parse_repeatable_csv(values: list[str] | None) -> tuple[str, ...]:
 
 
 def _effective_fail_on(fail_on: list[FailOnMode] | None, strict: bool) -> set[str]:
+    """Resolve failure conditions after applying defaults and `--strict` behavior."""
     active = {item.value for item in (fail_on or [])}
     if not active:
+        # Rationale: preserve historical behavior where only invalid names fail by default.
         active = {FailOnMode.invalid_names.value}
     if strict:
+        # Why: `--strict` is a convenience alias for enabling filesystem-error failures.
         active.add(FailOnMode.errors.value)
     return active
 
@@ -125,6 +137,12 @@ def scan(
         typer.Option("--log-level", help="CLI overrides LOG_LEVEL env"),
     ] = None,
 ) -> None:
+    """Scan a directory tree and emit a deterministic report.
+
+    Parameters are CLI-facing and intentionally map closely to automation use
+    cases (filtering, fail conditions, and output format). Raises `typer.Exit`
+    with documented process exit codes rather than returning a value.
+    """
     settings = get_settings(log_level_override=log_level, metrics_path_override=metrics_path)
     setup_logging(settings.log_level)
 
@@ -161,6 +179,7 @@ def scan(
                 errors_total=result.errors_total,
             )
         except OSError as exc:
+            # Rationale: metrics export is optional and should not mask scan results.
             logger.warning("Failed to write metrics: %s", exc)
 
     typer.echo(f"Scanned: {path.resolve()}", err=True)
@@ -179,6 +198,7 @@ def scan(
     ):
         raise typer.Exit(code=EXIT_RULE_VIOLATION)
 
+    # Why: use explicit exit for consistent CLI behavior in tests and automation wrappers.
     raise typer.Exit(code=EXIT_OK)
 
 

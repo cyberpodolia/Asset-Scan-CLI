@@ -1,3 +1,5 @@
+"""CLI integration tests for report content, exit codes, and error handling."""
+
 from __future__ import annotations
 
 import json
@@ -13,6 +15,7 @@ runner = CliRunner()
 
 
 def _invoke(args: list[str]):
+    """Run the Typer app with the same command shape end users use (`scan ...`)."""
     return runner.invoke(app, args)
 
 
@@ -158,6 +161,8 @@ def test_fail_on_errors_changes_exit_code_and_reports_errors(tmp_path: Path, mon
     original_scandir = scanner_module.os.scandir
 
     def flaky_scandir(path):
+        # Why: patch `os.scandir` at the scanner module boundary to simulate a directory
+        # permission failure in a platform-tolerant way without OS-specific ACL setup.
         if os.fspath(path) == os.fspath(blocked):
             raise PermissionError("simulated permission denied")
         return original_scandir(path)
