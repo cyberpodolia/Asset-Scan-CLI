@@ -1,45 +1,117 @@
-﻿# Asset Scan CLI
+# Asset Scan CLI
 
-[![CI](https://github.com/yourname/repo3-cli-asset-scan/actions/workflows/ci.yml/badge.svg)](https://github.com/yourname/repo3-cli-asset-scan/actions/workflows/ci.yml)
+[![CI](https://github.com/example/repo3-cli-asset-scan/actions/workflows/ci.yml/badge.svg)](https://github.com/example/repo3-cli-asset-scan/actions/workflows/ci.yml)
 
-A small CLI tool that scans a directory, applies naming rules, and writes a JSON report.
+Small Python CLI to scan asset trees, validate naming rules, detect duplicate names, and emit deterministic reports plus Prometheus textfile metrics.
 
-## Run in 60 seconds
+## Install
 
 ```bash
 python -m venv .venv
-. .venv/bin/activate  # On Windows: .venv\Scripts\activate
+. .venv/bin/activate  # Windows: .venv\Scripts\activate
 pip install -e ".[dev]"
-python -m asset_scan.cli scan . --output report.json
 ```
 
-## Quickstart
+Console script:
+
+```bash
+asset-scan scan ./assets --output report.json
+```
+
+Module invocation remains supported:
 
 ```bash
 python -m asset_scan.cli scan ./assets --output report.json
 ```
 
-## What this demonstrates
-
-- Practical CLI design with Typer
-- File system scanning and reporting
-- Clear exit codes for automation
-- Tests with pytest and CI integration
-
 ## Usage
 
 ```bash
-python -m asset_scan.cli scan PATH \
+asset-scan scan PATH \
   --output report.json \
-  --extensions ".png,.jpg,.fbx,.obj,.wav" \
-  --name-regex "^[a-z0-9_\\-]+$"
+  --extensions ".png,.jpg" --extensions wav \
+  --exclude "**/.git/**" --exclude "**/node_modules/**" \
+  --name-regex "^[a-z0-9_\\-]+$" \
+  --validate stem \
+  --duplicates-key stem \
+  --top-n-largest 10
 ```
 
-## Metrics
+## Examples
 
-- Set `METRICS_PATH` to write Prometheus textfile metrics after each scan.
+Write JSON to stdout:
 
-## Exit codes
+```bash
+asset-scan scan ./assets --output -
+```
 
-- `0` if no invalid names were found
-- `2` if invalid names are present
+NDJSON report:
+
+```bash
+asset-scan scan ./assets --format ndjson --output report.ndjson
+```
+
+Exclude generated folders and fail on duplicates too:
+
+```bash
+asset-scan scan ./assets \
+  --exclude "**/.git/**" \
+  --exclude "**/build/**" \
+  --fail-on duplicates
+```
+
+Strict filesystem error handling:
+
+```bash
+asset-scan scan ./assets --strict
+```
+
+## Exit Codes
+
+| Code | Meaning |
+| --- | --- |
+| `0` | No active fail conditions triggered |
+| `2` | Naming/duplicate rule failure (`invalid-names` and/or `duplicates`) |
+| `3` | Filesystem scan errors with `--strict` or `--fail-on errors` |
+
+Default `--fail-on` is only `invalid-names`.
+
+## Report Schema (overview)
+
+Report output defaults to JSON (`--format json`) and includes:
+
+- `schema_version`
+- `tool_version`
+- `scanned_path` (always `"."`, paths are relative to scan root)
+- `timestamp_utc`
+- `total_files`
+- `by_extension`
+- `invalid_names` (sorted)
+- `largest_files` (`[{path, size}]`, sorted by size desc then path)
+- `duplicates_by_name` (`[{name, count, paths}]`, sorted)
+- `duplicate_groups_total`
+- `errors_total`
+- `errors` (`[{path, error_type, message}]`, capped by `--max-errors`)
+
+Notes:
+
+- `--validate` controls what the regex validates: `stem`, `filename`, or `relpath`.
+- `--duplicates-key` controls duplicate grouping: `stem` or `stem+ext`.
+- Duplicate path samples per group are capped (`--max-duplicate-paths`) while counts remain accurate.
+
+## Metrics (Prometheus textfile)
+
+Set `METRICS_PATH` or pass `--metrics-path` to write metrics atomically (temp file + replace).
+
+```bash
+METRICS_PATH=/var/lib/node_exporter/textfile_collector/asset_scan.prom \
+asset-scan scan ./assets
+```
+
+Metrics emitted:
+
+- `asset_scan_duration_seconds`
+- `asset_scan_files`
+- `asset_scan_invalid_names`
+- `asset_scan_duplicate_groups`
+- `asset_scan_errors`

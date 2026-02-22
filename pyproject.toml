@@ -9,7 +9,7 @@ description = "CLI tool to scan assets and produce a JSON report"
 readme = "README.md"
 requires-python = ">=3.11"
 license = {text = "MIT"}
-authors = [{name = "Your Name"}]
+authors = [{name = "Maintainers"}]
 dependencies = [
   "typer>=0.12.0",
   "prometheus-client>=0.20.0",
@@ -20,6 +20,9 @@ dev = [
   "pytest>=7.4.0",
   "ruff>=0.4.0",
 ]
+
+[project.scripts]
+asset-scan = "asset_scan.cli:app"
 
 [tool.hatch.build.targets.wheel]
 packages = ["asset_scan"]
