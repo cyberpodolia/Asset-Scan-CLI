@@ -1,6 +1,6 @@
-# Asset Scan CLI
+﻿sset Scan CLI
 
-[![CI](https://github.com/example/repo3-cli-asset-scan/actions/workflows/ci.yml/badge.svg)](https://github.com/example/repo3-cli-asset-scan/actions/workflows/ci.yml)
+
 
 Small Python CLI to scan asset trees, validate naming rules, detect duplicate names, and emit deterministic reports plus Prometheus textfile metrics.
 
